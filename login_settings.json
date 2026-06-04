@@ -1,0 +1,13 @@
+{
+  "host": "10.28.165.18",
+  "user": "Ableson.Niu",
+  "password": "admin@fs123",
+  "monitor_dir": "/home/Ableson.Niu/N5850-48S6C_Q2-main-2/",
+  "dut_name": "N5850-48S6C_DUT5",
+  "dut_ip": "10.28.164.15",
+  "dut_user": "admin",
+  "dut_pass": "pica8",
+  "automation_cmd": "../automation/ws",
+  "max_retry": 2,
+  "theme": "dark"
+}

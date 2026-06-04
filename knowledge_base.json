@@ -1,0 +1,24 @@
+[
+  {
+    "pattern": "[line:102] #Proc -- Fail: {pica8CheckText <ttyS[01]> Failed, the result is not expected as below:}",
+    "cause": "1111",
+    "solution": "",
+    "category": "其他",
+    "script_name": "pica8CliSysRunshow_01_04",
+    "step_info": "Step 1: run show system boot-messages",
+    "added_by": "",
+    "added_at": "2026-06-01 14:12",
+    "hit_count": 0
+  },
+  {
+    "pattern": "11111",
+    "cause": "11111",
+    "solution": "1111111",
+    "category": "时序问题",
+    "script_name": "111",
+    "step_info": "",
+    "added_by": "",
+    "added_at": "2026-05-29 17:37",
+    "hit_count": 0
+  }
+]

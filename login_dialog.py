@@ -1,0 +1,283 @@
+"""登录对话框 GUI（sv-ttk 主题）"""
+
+import json
+import os
+import sys
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+from . import theme
+from .config import (
+    DEFAULT_HOST, DEFAULT_USER, DEFAULT_PASS, DEFAULT_DIR,
+    DEFAULT_AUTOMATION_CMD, DEFAULT_DUT_NAME,
+    DEFAULT_DUT_IP, DEFAULT_DUT_USER, DEFAULT_DUT_PASS,
+    MAX_RETRY,
+)
+
+
+def _get_settings_path():
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "login_settings.json")
+
+
+def _load_settings():
+    path = _get_settings_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_settings(data):
+    path = _get_settings_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+class LoginDialog:
+    """SSH 登录参数输入对话框，支持监控模式和批量跑模式切换"""
+
+    FIELD_LABELS = {
+        "host": "SSH_HOST",
+        "user": "SSH_USER",
+        "password": "SSH_PASS",
+        "monitor_dir": "Monitor_Dir",
+    }
+
+    def __init__(self, master, initial_scripts=None):
+        self.top = tk.Toplevel(master)
+        self.top.title("测试脚本工具")
+        self.top.resizable(False, False)
+        self.top.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self._result = None
+
+        self._set_icon(self.top)
+
+        saved = _load_settings()
+
+        # 主题已经在 show_login 里应用过，这里只确保设置同步
+        theme.set_current(saved.get("theme", "light"))
+
+        # 主容器
+        container = ttk.Frame(self.top, padding=15)
+        container.pack(fill="both", expand=True)
+
+        # === 顶部标题 ===
+        title_frame = ttk.Frame(container)
+        title_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(title_frame, text="测试脚本工具", font=("Segoe UI", 14, "bold")).pack(side="left")
+
+        # 主题切换
+        self.theme_var = tk.StringVar(value=theme.get_current())
+        theme_frame = ttk.Frame(title_frame)
+        theme_frame.pack(side="right")
+        ttk.Label(theme_frame, text="主题:").pack(side="left", padx=(0, 5))
+        ttk.Combobox(theme_frame, textvariable=self.theme_var,
+                     values=["light", "dark"], width=6, state="readonly"
+                     ).pack(side="left")
+        self.theme_var.trace_add("write", self._on_theme_change)
+
+        # === 公共字段 ===
+        form_frame = ttk.LabelFrame(container, text="服务器连接", padding=10)
+        form_frame.pack(fill="x", pady=(0, 8))
+
+        self.host_var = tk.StringVar(value=saved.get("host", DEFAULT_HOST))
+        self.user_var = tk.StringVar(value=saved.get("user", DEFAULT_USER))
+        self.pass_var = tk.StringVar(value=saved.get("password", DEFAULT_PASS))
+        self.dir_var = tk.StringVar(value=saved.get("monitor_dir", DEFAULT_DIR))
+
+        self._add_field(form_frame, 0, "SSH_HOST:", self.host_var)
+        self._add_field(form_frame, 1, "SSH_USER:", self.user_var)
+        self._add_field(form_frame, 2, "SSH_PASS:", self.pass_var, show="*")
+        self._add_field(form_frame, 3, "Monitor_Dir:", self.dir_var)
+        form_frame.columnconfigure(1, weight=1)
+
+        # === 模式选择 ===
+        mode_frame = ttk.Frame(container)
+        mode_frame.pack(fill="x", pady=8)
+        ttk.Label(mode_frame, text="运行模式:").pack(side="left", padx=(0, 10))
+        self.mode_var = tk.StringVar(value="monitor")
+        ttk.Radiobutton(mode_frame, text="监控模式", variable=self.mode_var,
+                        value="monitor", command=self._toggle_batch).pack(side="left", padx=10)
+        ttk.Radiobutton(mode_frame, text="运行/分析脚本模式", variable=self.mode_var,
+                        value="batch", command=self._toggle_batch).pack(side="left", padx=10)
+
+        self.popup_var = tk.BooleanVar(value=True)
+
+        # === 批量跑配置区 ===
+        self.batch_frame = ttk.LabelFrame(container, text="批量跑配置", padding=10)
+        self.batch_frame.pack(fill="both", expand=True, pady=(0, 8))
+
+        self.dut_var = tk.StringVar(value=saved.get("dut_name", DEFAULT_DUT_NAME))
+        self.dut_ip_var = tk.StringVar(value=saved.get("dut_ip", DEFAULT_DUT_IP))
+        self.dut_user_var = tk.StringVar(value=saved.get("dut_user", DEFAULT_DUT_USER))
+        self.dut_pass_var = tk.StringVar(value=saved.get("dut_pass", DEFAULT_DUT_PASS))
+        self.cmd_var = tk.StringVar(value=saved.get("automation_cmd", DEFAULT_AUTOMATION_CMD))
+        self.retry_var = tk.IntVar(value=int(saved.get("max_retry", MAX_RETRY)))
+
+        self._add_field(self.batch_frame, 0, "DB 名称:", self.dut_var)
+        self._add_field(self.batch_frame, 1, "DUT IP:", self.dut_ip_var)
+        self._add_field(self.batch_frame, 2, "DUT 用户:", self.dut_user_var)
+        self._add_field(self.batch_frame, 3, "DUT 密码:", self.dut_pass_var, show="*")
+        self._add_field(self.batch_frame, 4, "执行命令:", self.cmd_var)
+
+        # 重试次数行
+        ttk.Label(self.batch_frame, text="失败重试次数:").grid(row=5, column=0, sticky="e", padx=5, pady=4)
+        retry_row = ttk.Frame(self.batch_frame)
+        retry_row.grid(row=5, column=1, sticky="w", pady=4)
+        ttk.Spinbox(retry_row, from_=1, to=10, width=5,
+                    textvariable=self.retry_var).pack(side="left")
+        ttk.Label(retry_row, text="（连续 N 次都 fail 才算 fail）",
+                  foreground="gray").pack(side="left", padx=8)
+
+        self.batch_frame.columnconfigure(1, weight=1)
+
+        # 返回登录时恢复模式
+        if initial_scripts:
+            self.mode_var.set("batch")
+
+        self._toggle_batch()
+
+        # === 底部按钮 ===
+        btn_frame = ttk.Frame(container)
+        btn_frame.pack(fill="x", pady=(5, 0))
+        ttk.Button(btn_frame, text="取消", width=12,
+                   command=self._on_cancel).pack(side="right", padx=4)
+        ttk.Button(btn_frame, text="开始", width=12, style="Accent.TButton",
+                   command=self._on_connect).pack(side="right", padx=4)
+
+        # 构建完成后再强制 apply 一次，确保所有 ttk 控件样式刷新
+        self.top.update_idletasks()
+        theme.apply(self.top)
+
+    def _add_field(self, parent, row, label, var, show=None):
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="e", padx=5, pady=4)
+        kwargs = {"textvariable": var}
+        if show:
+            kwargs["show"] = show
+        entry = ttk.Entry(parent, **kwargs)
+        entry.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
+
+    def _on_theme_change(self, *_):
+        new_theme = self.theme_var.get()
+        theme.set_current(new_theme)
+        theme.apply(self.top)
+
+    @staticmethod
+    def _set_icon(window):
+        if getattr(sys, 'frozen', False):
+            icon_path = os.path.join(os.path.dirname(sys.executable), "app_icon.ico")
+        else:
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app_icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                window.iconbitmap(icon_path)
+            except Exception:
+                pass
+
+    def _toggle_batch(self):
+        if self.mode_var.get() == "batch":
+            self.batch_frame.pack(fill="both", expand=True, pady=(0, 8))
+            # 让窗口随内容增大
+            self.top.geometry("")
+        else:
+            self.batch_frame.pack_forget()
+            self.top.geometry("")
+
+    def validate_fields(self):
+        empty = []
+        values = {
+            "host": self.host_var.get(),
+            "user": self.user_var.get(),
+            "password": self.pass_var.get(),
+            "monitor_dir": self.dir_var.get(),
+        }
+        for key, val in values.items():
+            if not val.strip():
+                empty.append(self.FIELD_LABELS[key])
+        return empty
+
+    def _on_connect(self):
+        empty = self.validate_fields()
+        if empty:
+            messagebox.showwarning("输入不完整", f"请填写以下字段：{', '.join(empty)}")
+            return
+
+        mode = self.mode_var.get()
+        if mode == "batch":
+            if not self.dut_var.get().strip():
+                messagebox.showwarning("输入不完整", "请填写 DUT 名称")
+                return
+
+        self._result = {
+            "host": self.host_var.get().strip(),
+            "user": self.user_var.get().strip(),
+            "password": self.pass_var.get(),
+            "monitor_dir": self.dir_var.get().strip(),
+            "mode": mode,
+            "popup": self.popup_var.get(),
+        }
+        if mode == "batch":
+            self._result["dut_name"] = self.dut_var.get().strip()
+            self._result["dut_ip"] = self.dut_ip_var.get().strip()
+            self._result["dut_user"] = self.dut_user_var.get().strip()
+            self._result["dut_pass"] = self.dut_pass_var.get()
+            self._result["automation_cmd"] = self.cmd_var.get().strip()
+            self._result["scripts"] = []
+            try:
+                self._result["max_retry"] = max(1, int(self.retry_var.get()))
+            except (ValueError, tk.TclError):
+                self._result["max_retry"] = MAX_RETRY
+
+        try:
+            saved_retry = max(1, int(self.retry_var.get()))
+        except (ValueError, tk.TclError):
+            saved_retry = MAX_RETRY
+
+        _save_settings({
+            "host": self.host_var.get().strip(),
+            "user": self.user_var.get().strip(),
+            "password": self.pass_var.get(),
+            "monitor_dir": self.dir_var.get().strip(),
+            "dut_name": self.dut_var.get().strip(),
+            "dut_ip": self.dut_ip_var.get().strip(),
+            "dut_user": self.dut_user_var.get().strip(),
+            "dut_pass": self.dut_pass_var.get(),
+            "automation_cmd": self.cmd_var.get().strip(),
+            "max_retry": saved_retry,
+            "theme": theme.get_current(),
+        })
+
+        self.top.destroy()
+
+    def _on_cancel(self):
+        self._result = None
+        self.top.destroy()
+
+    @property
+    def result(self):
+        return self._result
+
+
+def show_login(initial_scripts=None):
+    root = tk.Tk()
+    root.withdraw()
+    # 先应用主题到根窗口，让 sv-ttk 资源（样式/字体）在创建 Toplevel 前就绪
+    saved = _load_settings()
+    theme.set_current(saved.get("theme", "light"))
+    theme.apply(root)
+
+    dlg = LoginDialog(root, initial_scripts=initial_scripts)
+    root.wait_window(dlg.top)
+    result = dlg.result
+    root.destroy()
+    return result
