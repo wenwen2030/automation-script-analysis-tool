@@ -743,11 +743,18 @@ class BatchControlPanel:
                 return
             self.stop_event.set()
         self._stop_timer()
+        # 先断开所有终端连接并等待线程退出
         try:
             if hasattr(self, "ssh_terminal"):
                 self.ssh_terminal.disconnect_all()
         except Exception:
             pass
+        # 等待 worker 线程退出
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=2)
+        # 短暂等待让后台线程完全退出，避免 GC 在错误线程回收 Tk 变量
+        import time
+        time.sleep(0.2)
         self.root.destroy()
 
     def run(self):

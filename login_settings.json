@@ -8,6 +8,6 @@
   "dut_user": "admin",
   "dut_pass": "pica8",
   "automation_cmd": "../automation/ws",
-  "max_retry": 2,
+  "max_retry": 1,
   "theme": "dark"
 }

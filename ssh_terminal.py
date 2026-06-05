@@ -108,7 +108,7 @@ class SshTerminal(ttk.Frame):
         self.text.bind("<Next>", lambda e: (self.text.yview_scroll(1,"pages"), "break")[-1])
         # 屏幕区标记（LEFT gravity：在它之前插入历史时标记不移动）
         self.text.mark_set("screen_start", "1.0")
-        self.text.mark_gravity("screen_start", tk.LEFT)
+        self.text.mark_gravity("screen_start", tk.RIGHT)
         self.menu = tk.Menu(self.text, tearoff=0)
         self.menu.add_command(label="复制", command=self._copy)
         self.menu.add_command(label="粘贴", command=self._paste)
@@ -117,7 +117,7 @@ class SshTerminal(ttk.Frame):
         # 初始化屏幕区域标记
         # screen_start: LEFT gravity（在它之前插入历史时，标记不移动）
         self.text.mark_set("screen_start", "1.0")
-        self.text.mark_gravity("screen_start", tk.LEFT)
+        self.text.mark_gravity("screen_start", tk.RIGHT)
         self._screen_mark = "screen_start"
         self.text.bind("<Button-3>", lambda e: (self.menu.tk_popup(e.x_root, e.y_root), self.menu.grab_release()))
 
@@ -210,6 +210,9 @@ class SshTerminal(ttk.Frame):
 
     def disconnect(self):
         self._stop_reader.set()
+        # 等待 reader 线程退出
+        if self.reader_thread and self.reader_thread.is_alive():
+            self.reader_thread.join(timeout=1)
         for obj in (self.shell, self.client, self.tn):
             try:
                 if obj: obj.close()
