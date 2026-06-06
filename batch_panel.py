@@ -328,11 +328,17 @@ class BatchControlPanel:
     def log(self, msg, tag="info"):
         """向日志面板追加一行文本（线程安全）"""
         def _append():
-            self.log_text.config(state=tk.NORMAL)
-            self.log_text.insert(tk.END, msg + "\n", tag)
-            self.log_text.see(tk.END)
-            self.log_text.config(state=tk.DISABLED)
-        self.root.after(0, _append)
+            try:
+                self.log_text.config(state=tk.NORMAL)
+                self.log_text.insert(tk.END, msg + "\n", tag)
+                self.log_text.see(tk.END)
+                self.log_text.config(state=tk.DISABLED)
+            except (tk.TclError, RuntimeError):
+                pass
+        try:
+            self.root.after(0, _append)
+        except (RuntimeError, tk.TclError):
+            pass
 
     def _add_scripts(self):
         raw = self.script_input_text.get("1.0", tk.END)
@@ -715,8 +721,9 @@ class BatchControlPanel:
             path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "last_results.json")
             with open(path, "w", encoding="utf-8") as f:
                 _json.dump(results, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            print(f"[save_results] saved {len(results)} items to {path}")
+        except Exception as e:
+            print(f"[save_results] ERROR: {e}")
 
     def _load_results(self):
         """恢复上次保存的执行结果"""
@@ -725,17 +732,19 @@ class BatchControlPanel:
         try:
             path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "last_results.json")
             if not _os.path.exists(path):
+                print(f"[load_results] not found: {path}")
                 return
             with open(path, "r", encoding="utf-8") as f:
                 results = _json.load(f)
+            print(f"[load_results] loaded {len(results)} items")
             for r in results:
-                tag = "pass" if r["result"] == "PASS" else "fail" if r["result"] in ("FAIL", "ERRSCR", "ERRSCRIPT") else "stopped"
+                tag = "pass" if r["result"] == "PASS" else "fail" if r["result"] in ("FAIL", "ERRSCR", "ERRSCRIPT", "STALL") else "stopped"
                 self.result_tree.insert("", "end",
                                         values=(r["script"], r["result"], r["duration"]),
                                         tags=(tag,))
             self._update_stats()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[load_results] ERROR: {e}")
 
     def _on_close(self):
         if self.worker_thread and self.worker_thread.is_alive():

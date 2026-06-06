@@ -1,12 +1,22 @@
 [
   {
-    "script": "pica8TacacsFunc_04_01",
-    "result": "PASS",
-    "duration": "2:15"
+    "script": "1111",
+    "result": "中断",
+    "duration": "0:05"
   },
   {
-    "script": "pica8TacacsFunc_01_06",
-    "result": "ERRSCRIPT",
-    "duration": "0:26"
+    "script": "stMirrorFun_02_10",
+    "result": "PASS",
+    "duration": "0:22"
+  },
+  {
+    "script": "stMirrorFun_02_09",
+    "result": "中断",
+    "duration": "0:09"
+  },
+  {
+    "script": "111",
+    "result": "中断",
+    "duration": "0:05"
   }
 ]
