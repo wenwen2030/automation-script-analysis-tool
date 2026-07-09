@@ -20,7 +20,8 @@ class BatchControlPanel:
 
     def __init__(self, host, user, password, monitor_dir, popup_enabled,
                  automation_cmd, dut_name, initial_scripts,
-                 dut_ip="", dut_user="admin", dut_pass="pica8", max_retry=MAX_RETRY):
+                 dut_ip="", dut_user="admin", dut_pass="pica8", max_retry=MAX_RETRY,
+                 dut_devices=None):
         self.host = host
         self.user = user
         self.password = password
@@ -28,6 +29,7 @@ class BatchControlPanel:
         self.popup_enabled = popup_enabled
         self.automation_cmd = automation_cmd
         self.dut_name = dut_name
+        self.dut_devices = dut_devices or []
         self.dut_ip = dut_ip
         self.dut_user = dut_user
         self.dut_pass = dut_pass
@@ -183,13 +185,17 @@ class BatchControlPanel:
         self.result_tree.pack(side="left", fill="both", expand=True)
         res_scrollbar.pack(side="left", fill="y")
 
-        # 右键菜单：分析失败原因 / 复制脚本名
+        # 右键菜单：分析失败原因 / 复制脚本名 / 删除选中
         self.result_menu = tk.Menu(self.result_tree, tearoff=0)
         self.result_menu.add_command(label="复制脚本名", command=self._copy_script_name)
         self.result_menu.add_command(label="分析失败原因...", command=self._analyze_selected)
+        self.result_menu.add_separator()
+        self.result_menu.add_command(label="删除选中", command=self._delete_selected_results)
         self.result_tree.bind("<Button-3>", self._show_result_menu)
         # 双击直接分析
         self.result_tree.bind("<Double-1>", lambda e: self._analyze_selected())
+        # Delete 键删除选中结果
+        self.result_tree.bind("<Delete>", lambda e: self._delete_selected_results())
 
         self.stats_var = tk.StringVar(value="PASS: 0    FAIL: 0    总计: 0")
         stats_frame = ttk.Frame(result_frame)
@@ -198,6 +204,8 @@ class BatchControlPanel:
                   font=("Segoe UI", 9, "bold")).pack(side="left")
         ttk.Button(stats_frame, text="清空结果", width=10,
                    command=self._clear_results).pack(side="right")
+        ttk.Button(stats_frame, text="删除选中", width=10,
+                   command=self._delete_selected_results).pack(side="right", padx=(0, 4))
 
         self.running_item_id = None
 
@@ -418,39 +426,44 @@ class BatchControlPanel:
                 self.log(f"终止远程进程失败: {e}", "error")
 
         # 2. SSH 到交换机恢复初始配置
-        if not self.dut_ip:
-            self.log("未配置 DUT IP，跳过交换机配置恢复")
+        if not self.dut_devices:
+            self.log("未配置 DUT 设备，跳过交换机配置恢复")
             return
 
-        try:
-            self.log(f"正在连接交换机 {self.dut_ip} 恢复配置...", "highlight")
-            dut_client = paramiko.SSHClient()
-            dut_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            dut_client.connect(self.dut_ip, username=self.dut_user, password=self.dut_pass, timeout=15,
-                               look_for_keys=False, allow_agent=False)
-            shell = dut_client.invoke_shell(width=200, height=50)
-            time.sleep(1)
-            if shell.recv_ready():
-                shell.recv(65535)
+        for dev in self.dut_devices:
+            role = dev.get("role", "DUT")
+            ip = dev.get("ip", "")
+            if not ip:
+                continue
+            try:
+                self.log(f"正在连接 {role}({ip}) 恢复配置...", "highlight")
+                dut_client = paramiko.SSHClient()
+                dut_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                dut_client.connect(ip, username=self.dut_user, password=self.dut_pass, timeout=15,
+                                   look_for_keys=False, allow_agent=False)
+                shell = dut_client.invoke_shell(width=200, height=50)
+                time.sleep(1)
+                if shell.recv_ready():
+                    shell.recv(65535)
 
-            shell.send("configure\n")
-            time.sleep(2)
-            shell.send("load override /cftmp/pica_startup.boot\n")
-            time.sleep(5)
-            shell.send("commit\n")
-            time.sleep(10)
+                shell.send("configure\n")
+                time.sleep(2)
+                shell.send("load override /cftmp/pica_startup.boot\n")
+                time.sleep(5)
+                shell.send("commit\n")
+                time.sleep(10)
 
-            output = b""
-            while shell.recv_ready():
-                output += shell.recv(65535)
-            self.log(f"交换机输出: {output.decode('utf-8', errors='replace')}")
+                output = b""
+                while shell.recv_ready():
+                    output += shell.recv(65535)
+                self.log(f"{role}({ip}) 输出: {output.decode('utf-8', errors='replace')}")
 
-            shell.send("exit\n")
-            time.sleep(1)
-            dut_client.close()
-            self.log(f"交换机 {self.dut_ip} 配置已恢复", "success")
-        except Exception as e:
-            self.log(f"交换机配置恢复失败: {e}", "error")
+                shell.send("exit\n")
+                time.sleep(1)
+                dut_client.close()
+                self.log(f"{role}({ip}) 配置已恢复", "success")
+            except Exception as e:
+                self.log(f"{role}({ip}) 配置恢复失败: {e}", "error")
 
     def _poll_worker(self):
         if self.worker_thread and self.worker_thread.is_alive():
@@ -536,7 +549,7 @@ class BatchControlPanel:
                 mins, secs = divmod(elapsed, 60)
                 hours, mins = divmod(mins, 60)
                 time_str = f"{hours}:{mins:02d}:{secs:02d}" if hours > 0 else f"{mins}:{secs:02d}"
-                tag = "pass" if result_text.upper() == "PASS" else "fail" if result_text.upper() in ("FAIL", "ERRSCRIPT") else "stopped"
+                tag = "pass" if result_text.upper() == "PASS" else "fail" if result_text.upper() in ("FAIL", "ERRSCRIPT", "UNDEFINED") else "stopped"
                 self.result_tree.item(self.running_item_id, values=(
                     self.result_tree.set(self.running_item_id, "script"),
                     result_text.upper(), time_str
@@ -552,7 +565,7 @@ class BatchControlPanel:
             result = self.result_tree.set(item_id, "result")
             if result == "PASS":
                 pass_count += 1; total += 1
-            elif result in ("FAIL", "ERRSCRIPT", "UNKNOWN", "中断"):
+            elif result in ("FAIL", "ERRSCRIPT", "UNKNOWN", "中断", "UNDEFINED"):
                 fail_count += 1; total += 1
         self.stats_var.set(f"PASS: {pass_count}    FAIL: {fail_count}    总计: {total}")
 
@@ -561,6 +574,16 @@ class BatchControlPanel:
         self.result_tree.delete(*self.result_tree.get_children())
         self.summary = []
         self._update_stats()
+
+    def _delete_selected_results(self):
+        """删除执行结果中选中的行"""
+        sel = self.result_tree.selection()
+        if not sel:
+            return
+        for item_id in sel:
+            self.result_tree.delete(item_id)
+        self._update_stats()
+        self._save_results()
 
     # ---- 后台执行 ----
 
@@ -608,6 +631,13 @@ class BatchControlPanel:
 
                 if result.lower() == "pass":
                     final_result = result
+                    if self.popup_enabled:
+                        show_popup(result)
+                    break
+                elif result.lower() == "undefined":
+                    # undefined 表示脚本已正常结束但结果未定义，不需要重试
+                    final_result = result
+                    self.log(f"  结果: UNDEFINED，跳过重试", "error")
                     if self.popup_enabled:
                         show_popup(result)
                     break
@@ -710,6 +740,8 @@ class BatchControlPanel:
     def _save_results(self):
         """保存执行结果到本地文件"""
         import json as _json
+        import sys as _sys
+        import os as _os
         results = []
         for item_id in self.result_tree.get_children():
             script = self.result_tree.set(item_id, "script")
@@ -717,8 +749,11 @@ class BatchControlPanel:
             duration = self.result_tree.set(item_id, "duration")
             results.append({"script": script, "result": result, "duration": duration})
         try:
-            import os as _os
-            path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "last_results.json")
+            if getattr(_sys, 'frozen', False):
+                base = _os.path.dirname(_sys.executable)
+            else:
+                base = _os.path.dirname(_os.path.abspath(__file__))
+            path = _os.path.join(base, "last_results.json")
             with open(path, "w", encoding="utf-8") as f:
                 _json.dump(results, f, ensure_ascii=False, indent=2)
             print(f"[save_results] saved {len(results)} items to {path}")
@@ -728,9 +763,14 @@ class BatchControlPanel:
     def _load_results(self):
         """恢复上次保存的执行结果"""
         import json as _json
+        import sys as _sys
         import os as _os
         try:
-            path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "last_results.json")
+            if getattr(_sys, 'frozen', False):
+                base = _os.path.dirname(_sys.executable)
+            else:
+                base = _os.path.dirname(_os.path.abspath(__file__))
+            path = _os.path.join(base, "last_results.json")
             if not _os.path.exists(path):
                 print(f"[load_results] not found: {path}")
                 return

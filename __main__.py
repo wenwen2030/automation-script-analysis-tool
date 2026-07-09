@@ -9,9 +9,14 @@ import sys
 from .login_dialog import show_login
 from .monitor_panel import MonitorPanel
 from .batch_panel import BatchControlPanel
+from .analysis.script_index import get_index
+from .updater import check_update
 
 
 def main():
+    # 启动时异步建立脚本索引（不阻塞UI）
+    get_index().build_async()
+
     pending_scripts = None
 
     while True:
@@ -42,6 +47,7 @@ def main():
                 dut_user=params.get("dut_user", "admin"),
                 dut_pass=params.get("dut_pass", "pica8"),
                 max_retry=params.get("max_retry", 3),
+                dut_devices=params.get("dut_devices", []),
             )
             panel.run()
             if panel.go_back:

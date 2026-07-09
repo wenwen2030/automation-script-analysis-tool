@@ -16,6 +16,7 @@ from ..knowledge.manager_dialog import show_manager_dialog
 from ..knowledge.importer import import_from_file as kb_import
 from .highlighter import configure_tags as hl_configure_tags, highlight_text
 from .config_extractor import extract_configs_by_step, format_steps_for_display
+from .ai_chat import AiChatTab
 
 
 class AnalysisDialog:
@@ -179,6 +180,14 @@ class AnalysisDialog:
         self.cfg_text.tag_configure("cmd_other", foreground="#d4d4d4")
         self.cfg_text.tag_configure("cmd_view", foreground="#9cdcfe")
         self.nb.add(cfg_tab, text="  配置提取  ")
+
+        # ---- AI 分析 ----
+        self.ai_chat = AiChatTab(
+            self.nb,
+            get_log_fn=lambda: getattr(self, "_raw_text", ""),
+            get_script_name_fn=lambda: self.script_name,
+        )
+        self.nb.add(self.ai_chat, text="  AI 分析  ")
 
         # Ctrl+F 绑定
         self.top.bind("<Control-f>", lambda e: self._handle_ctrl_f())

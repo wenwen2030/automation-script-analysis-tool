@@ -7,57 +7,26 @@ import tkinter as tk
 import tkinter.ttk as ttk
 
 from .search_bar import SearchBar
+from .script_index import find_script, get_index
+from ..config import SCRIPT_SEARCH_DIRS
 
-# 默认搜索根目录（可在 config 中覆盖）
-DEFAULT_SCRIPT_DIR = r"Z:\automation\suite\xorplus"
+# 兼容旧接口
+DEFAULT_SCRIPT_DIR = SCRIPT_SEARCH_DIRS[0] if SCRIPT_SEARCH_DIRS else r"Z:\automation\suite\xorplus"
 
 
 def find_script_file(script_name, search_dir=None):
-    """在 search_dir 下递归搜索包含 script_name 的 .tcl 文件
+    """查找脚本文件（使用索引加速）
     
-    搜索策略：
-    1. 精确匹配：文件名 == pica8{script_name}.tcl 或 {script_name}.tcl
-    2. 模糊匹配：文件名包含 script_name（去掉 _XX_XX 后缀后的 feature 名）
-    
-    返回找到的文件完整路径，或 None
+    兼容旧接口：如果指定了 search_dir 且不在 SCRIPT_SEARCH_DIRS 中，
+    则回退到直接遍历该目录。
     """
-    if search_dir is None:
-        search_dir = DEFAULT_SCRIPT_DIR
+    # 如果没指定目录或指定的目录在配置列表中，使用索引
+    if search_dir is None or search_dir in SCRIPT_SEARCH_DIRS:
+        return find_script(script_name)
     
-    if not os.path.isdir(search_dir):
-        return None
-
-    # 候选文件名模式
-    candidates = [
-        f"pica8{script_name}.tcl",
-        f"{script_name}.tcl",
-    ]
-    
-    # 去掉末尾的 _XX_XX 数字后缀，得到 feature 关键词
-    # 例如 FunStaticRoute_02_04 → FunStaticRoute
-    feature_match = re.match(r"(.+?)_\d+_\d+$", script_name)
-    feature_name = feature_match.group(1) if feature_match else script_name
-
-    found_exact = None
-    found_fuzzy = None
-
-    for root, dirs, files in os.walk(search_dir):
-        for f in files:
-            if not f.endswith(".tcl"):
-                continue
-            f_lower = f.lower()
-            # 精确匹配
-            for cand in candidates:
-                if f_lower == cand.lower():
-                    return os.path.join(root, f)
-            # 模糊匹配：文件名包含脚本名
-            if script_name.lower() in f_lower:
-                found_exact = os.path.join(root, f)
-            # 更宽松：包含 feature 名
-            elif feature_name.lower() in f_lower and found_fuzzy is None:
-                found_fuzzy = os.path.join(root, f)
-
-    return found_exact or found_fuzzy
+    # 指定了自定义目录，直接遍历
+    from .script_index import _walk_search
+    return _walk_search(script_name, search_dir)
 
 
 class SourceViewer(ttk.Frame):

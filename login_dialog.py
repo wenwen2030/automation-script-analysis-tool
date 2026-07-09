@@ -118,22 +118,73 @@ class LoginDialog:
         self.batch_frame.pack(fill="both", expand=True, pady=(0, 8))
 
         self.dut_var = tk.StringVar(value=saved.get("dut_name", DEFAULT_DUT_NAME))
-        self.dut_ip_var = tk.StringVar(value=saved.get("dut_ip", DEFAULT_DUT_IP))
         self.dut_user_var = tk.StringVar(value=saved.get("dut_user", DEFAULT_DUT_USER))
         self.dut_pass_var = tk.StringVar(value=saved.get("dut_pass", DEFAULT_DUT_PASS))
         self.cmd_var = tk.StringVar(value=saved.get("automation_cmd", DEFAULT_AUTOMATION_CMD))
         self.retry_var = tk.IntVar(value=int(saved.get("max_retry", MAX_RETRY)))
 
         self._add_field(self.batch_frame, 0, "DB 名称:", self.dut_var)
-        self._add_field(self.batch_frame, 1, "DUT IP:", self.dut_ip_var)
-        self._add_field(self.batch_frame, 2, "DUT 用户:", self.dut_user_var)
-        self._add_field(self.batch_frame, 3, "DUT 密码:", self.dut_pass_var, show="*")
-        self._add_field(self.batch_frame, 4, "执行命令:", self.cmd_var)
+
+        # === 拓扑模式切换: 单机 / 组网 ===
+        topo_frame = ttk.Frame(self.batch_frame)
+        topo_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=4)
+        ttk.Label(topo_frame, text="拓扑模式:").pack(side="left", padx=(0, 10))
+        self._topo_mode = tk.StringVar(value=saved.get("topo_mode", "single"))
+        ttk.Radiobutton(topo_frame, text="单机", variable=self._topo_mode,
+                        value="single", command=self._toggle_topo).pack(side="left", padx=5)
+        ttk.Radiobutton(topo_frame, text="组网", variable=self._topo_mode,
+                        value="multi", command=self._toggle_topo).pack(side="left", padx=5)
+
+        # --- 单机模式: 单个DUT IP输入框 ---
+        self._single_frame = ttk.Frame(self.batch_frame)
+        self.dut_ip_var = tk.StringVar(value=saved.get("dut_ip", DEFAULT_DUT_IP))
+        ttk.Label(self._single_frame, text="DUT IP:").grid(row=0, column=0, sticky="e", padx=5, pady=4)
+        ttk.Entry(self._single_frame, textvariable=self.dut_ip_var).grid(row=0, column=1, sticky="ew", padx=5, pady=4)
+        self._single_frame.columnconfigure(1, weight=1)
+
+        # --- 组网模式: DUT设备列表 ---
+        self._multi_frame = ttk.Frame(self.batch_frame)
+
+        dut_list_label = ttk.Label(self._multi_frame, text="DUT 列表:")
+        dut_list_label.grid(row=0, column=0, sticky="ne", padx=5, pady=4)
+
+        dut_list_container = ttk.Frame(self._multi_frame)
+        dut_list_container.grid(row=0, column=1, sticky="ew", padx=5, pady=4)
+
+        self.dut_listbox = tk.Listbox(dut_list_container, height=4, width=40,
+                                       font=("Consolas", 9))
+        self.dut_listbox.pack(side="left", fill="both", expand=True)
+        dut_sb = ttk.Scrollbar(dut_list_container, orient=tk.VERTICAL,
+                                command=self.dut_listbox.yview)
+        dut_sb.pack(side="left", fill="y")
+        self.dut_listbox.config(yscrollcommand=dut_sb.set)
+
+        dut_btn_frame = ttk.Frame(dut_list_container)
+        dut_btn_frame.pack(side="left", padx=(8, 0))
+        ttk.Button(dut_btn_frame, text="添加", width=6,
+                   command=self._add_dut).pack(pady=2)
+        ttk.Button(dut_btn_frame, text="删除", width=6,
+                   command=self._remove_dut).pack(pady=2)
+
+        self._multi_frame.columnconfigure(1, weight=1)
+
+        # 加载已保存的DUT列表
+        self._dut_devices = saved.get("dut_devices", [])
+        if not self._dut_devices and saved.get("dut_ip"):
+            self._dut_devices = [{"role": "DUT1", "ip": saved["dut_ip"]}]
+        self._refresh_dut_listbox()
+
+        # 初始显示对应模式
+        self._toggle_topo()
+
+        self._add_field(self.batch_frame, 3, "DUT 用户:", self.dut_user_var)
+        self._add_field(self.batch_frame, 4, "DUT 密码:", self.dut_pass_var, show="*")
+        self._add_field(self.batch_frame, 5, "执行命令:", self.cmd_var)
 
         # 重试次数行
-        ttk.Label(self.batch_frame, text="失败重试次数:").grid(row=5, column=0, sticky="e", padx=5, pady=4)
+        ttk.Label(self.batch_frame, text="失败重试次数:").grid(row=6, column=0, sticky="e", padx=5, pady=4)
         retry_row = ttk.Frame(self.batch_frame)
-        retry_row.grid(row=5, column=1, sticky="w", pady=4)
+        retry_row.grid(row=6, column=1, sticky="w", pady=4)
         ttk.Spinbox(retry_row, from_=1, to=10, width=5,
                     textvariable=self.retry_var).pack(side="left")
         ttk.Label(retry_row, text="（连续 N 次都 fail 才算 fail）",
@@ -187,11 +238,71 @@ class LoginDialog:
     def _toggle_batch(self):
         if self.mode_var.get() == "batch":
             self.batch_frame.pack(fill="both", expand=True, pady=(0, 8))
-            # 让窗口随内容增大
             self.top.geometry("")
         else:
             self.batch_frame.pack_forget()
             self.top.geometry("")
+
+    def _toggle_topo(self):
+        """切换单机/组网模式显示"""
+        if self._topo_mode.get() == "single":
+            self._multi_frame.grid_forget()
+            self._single_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
+        else:
+            self._single_frame.grid_forget()
+            self._multi_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
+        self.top.geometry("")
+
+    def _refresh_dut_listbox(self):
+        """刷新DUT设备列表显示"""
+        self.dut_listbox.delete(0, tk.END)
+        for dev in self._dut_devices:
+            self.dut_listbox.insert(tk.END, f"{dev['role']}  {dev['ip']}")
+
+    def _add_dut(self):
+        """弹窗添加一台DUT设备"""
+        dialog = tk.Toplevel(self.top)
+        dialog.title("添加 DUT")
+        dialog.resizable(False, False)
+        dialog.transient(self.top)
+        dialog.grab_set()
+        self._set_icon(dialog)
+
+        frame = ttk.Frame(dialog, padding=15)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="角色名:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
+        role_var = tk.StringVar(value=f"DUT{len(self._dut_devices) + 1}")
+        ttk.Entry(frame, textvariable=role_var, width=20).grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(frame, text="IP 地址:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        ip_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=ip_var, width=20).grid(row=1, column=1, padx=5, pady=5)
+
+        def _confirm():
+            role = role_var.get().strip()
+            ip = ip_var.get().strip()
+            if not role or not ip:
+                return
+            self._dut_devices.append({"role": role, "ip": ip})
+            self._refresh_dut_listbox()
+            dialog.destroy()
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+        ttk.Button(btn_frame, text="确定", command=_confirm).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side="left", padx=5)
+
+        dialog.wait_window()
+
+    def _remove_dut(self):
+        """删除选中的DUT设备"""
+        sel = self.dut_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        self._dut_devices.pop(idx)
+        self._refresh_dut_listbox()
 
     def validate_fields(self):
         empty = []
@@ -228,7 +339,14 @@ class LoginDialog:
         }
         if mode == "batch":
             self._result["dut_name"] = self.dut_var.get().strip()
-            self._result["dut_ip"] = self.dut_ip_var.get().strip()
+            # 根据拓扑模式构建设备列表
+            if self._topo_mode.get() == "single":
+                ip = self.dut_ip_var.get().strip()
+                self._result["dut_devices"] = [{"role": "DUT1", "ip": ip}] if ip else []
+                self._result["dut_ip"] = ip
+            else:
+                self._result["dut_devices"] = self._dut_devices
+                self._result["dut_ip"] = self._dut_devices[0]["ip"] if self._dut_devices else ""
             self._result["dut_user"] = self.dut_user_var.get().strip()
             self._result["dut_pass"] = self.dut_pass_var.get()
             self._result["automation_cmd"] = self.cmd_var.get().strip()
@@ -249,6 +367,8 @@ class LoginDialog:
             "password": self.pass_var.get(),
             "monitor_dir": self.dir_var.get().strip(),
             "dut_name": self.dut_var.get().strip(),
+            "topo_mode": self._topo_mode.get(),
+            "dut_devices": self._dut_devices,
             "dut_ip": self.dut_ip_var.get().strip(),
             "dut_user": self.dut_user_var.get().strip(),
             "dut_pass": self.dut_pass_var.get(),
@@ -277,6 +397,11 @@ def show_login(initial_scripts=None):
     theme.apply(root)
 
     dlg = LoginDialog(root, initial_scripts=initial_scripts)
+
+    # 启动后台版本检查
+    from .updater import check_update
+    check_update(dlg.top)
+
     root.wait_window(dlg.top)
     result = dlg.result
     root.destroy()

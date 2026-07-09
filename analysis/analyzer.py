@@ -274,25 +274,10 @@ def extract_fail_phenomenon(text, fail_line_no, lines_around=15):
     return "\n".join(detail_parts)
 
 
-def find_local_script(script_name, search_dir=r"Z:\automation\suite\xorplus"):
-    """在本地搜索脚本源码文件"""
-    # 快速检测：如果目录不存在或不可达，立即返回（避免网络驱动器超时）
-    try:
-        if not os.path.isdir(search_dir):
-            return None
-    except OSError:
-        return None
-    candidates = [f"pica8{script_name}.tcl", f"{script_name}.tcl"]
-    for root, _, files in os.walk(search_dir):
-        for f in files:
-            if f.lower() in [c.lower() for c in candidates]:
-                return os.path.join(root, f)
-    # 模糊匹配
-    for root, _, files in os.walk(search_dir):
-        for f in files:
-            if script_name.lower() in f.lower() and f.endswith(".tcl"):
-                return os.path.join(root, f)
-    return None
+def find_local_script(script_name, search_dir=None):
+    """在本地搜索脚本源码文件（使用索引加速）"""
+    from .script_index import find_script
+    return find_script(script_name)
 
 
 def extract_packet_info_near_step(script_path, step_desc, step_no=""):
