@@ -4,8 +4,8 @@ import os
 import time
 import paramiko
 
-from .config import FINISH_PATTERN, POLL_INTERVAL, IGNORE_FILES, STALL_TIMEOUT, ERROR_PATTERNS
-from .utils import show_popup
+from ..config import FINISH_PATTERN, POLL_INTERVAL, IGNORE_FILES, STALL_TIMEOUT, ERROR_PATTERNS
+from ..utils import show_popup
 
 
 def find_latest_log(client, monitor_dir):

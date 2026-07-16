@@ -6,7 +6,7 @@ import webbrowser
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
-from .config import APP_VERSION, GITHUB_REPO
+from ..config import APP_VERSION, GITHUB_REPO
 
 
 def _parse_version(v):
@@ -24,7 +24,10 @@ def _parse_version(v):
 def _check_update_sync():
     """同步检查更新,返回 (new_version, release_notes, download_url) 或 None"""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-    req = Request(url, headers={"Accept": "application/vnd.github.v3+json"})
+    req = Request(url, headers={
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "MonitorTool-UpdateChecker",
+    })
 
     try:
         with urlopen(req, timeout=8) as resp:

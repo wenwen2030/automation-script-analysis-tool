@@ -18,7 +18,7 @@ SYSTEM_PROMPT = """\
 输出格式：
 - **现象**：简述失败的具体表现
 - **问题分类**：功能bug / 脚本问题 / 环境问题 / 平台不支持 / 其他
-- **详细原因**：用简洁中文描述根因
+- **详细原因**：用简洁中文描述根因,同时需要有证据辅证,有发包的地方我希望你能给出这个包详细是如何组的
 - **建议**：如何处理（重跑/修脚本/报bug/查环境）
 
 注意：
@@ -141,11 +141,11 @@ class AiChatTab(ttk.Frame):
             log_content = self.get_log_fn()
             if log_content:
                 script_name = self.get_script_name_fn() if self.get_script_name_fn else "unknown"
-                # 截取日志（最多取最后 3000 行避免 token 爆炸）
+                # 截取日志（最多取最后 8000 行，DeepSeek支持64K上下文）
                 lines = log_content.splitlines()
-                if len(lines) > 3000:
-                    log_content = "\n".join(lines[-3000:])
-                    log_content = f"[注: 日志过长，仅附带最后 3000 行]\n{log_content}"
+                if len(lines) > 8000:
+                    log_content = "\n".join(lines[-8000:])
+                    log_content = f"[注: 日志过长，仅附带最后 8000 行]\n{log_content}"
                 context_msg = f"以下是脚本 {script_name} 的运行日志:\n```\n{log_content}\n```\n\n{text}"
                 text = context_msg
 
@@ -167,9 +167,9 @@ class AiChatTab(ttk.Frame):
 
         script_name = self.get_script_name_fn() if self.get_script_name_fn else "unknown"
         lines = log_content.splitlines()
-        if len(lines) > 3000:
-            log_content = "\n".join(lines[-3000:])
-            log_content = f"[注: 日志过长，仅附带最后 3000 行]\n{log_content}"
+        if len(lines) > 8000:
+            log_content = "\n".join(lines[-8000:])
+            log_content = f"[注: 日志过长，仅附带最后 8000 行]\n{log_content}"
 
         prompt = f"请分析以下脚本 {script_name} 的运行日志，找出失败原因:\n```\n{log_content}\n```"
 
@@ -190,7 +190,10 @@ class AiChatTab(ttk.Frame):
         """实际调用 DeepSeek API"""
         try:
             client = self._get_client()
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + self.messages
+
+            # 构建增强的system prompt: 基础规则 + 知识库 + 经验
+            enhanced_prompt = self._build_enhanced_prompt()
+            messages = [{"role": "system", "content": enhanced_prompt}] + self.messages
 
             response = client.chat.completions.create(
                 model=self.model_var.get(),
@@ -293,3 +296,101 @@ class AiChatTab(ttk.Frame):
         self.chat_text.delete("1.0", tk.END)
         self.chat_text.config(state=tk.DISABLED)
         self._client = None  # 重置客户端，允许切换配置
+
+    def _build_enhanced_prompt(self):
+        """构建增强的system prompt: 基础规则 + 知识库匹配 + 分析经验"""
+        parts = [SYSTEM_PROMPT]
+
+        # 1. 注入知识库匹配结果(如果有日志)
+        kb_context = self._get_kb_context()
+        if kb_context:
+            parts.append(kb_context)
+
+        # 2. 注入分析经验指南
+        exp_context = self._get_experience_context()
+        if exp_context:
+            parts.append(exp_context)
+
+        # 3. 注入脚本源码摘要(如果能找到)
+        source_context = self._get_source_context()
+        if source_context:
+            parts.append(source_context)
+
+        return "\n\n".join(parts)
+
+    def _get_kb_context(self):
+        """从知识库中匹配已知问题,作为参考注入"""
+        try:
+            log_content = self.get_log_fn() if self.get_log_fn else ""
+            if not log_content:
+                return ""
+            script_name = self.get_script_name_fn() if self.get_script_name_fn else ""
+
+            from ..knowledge import match_knowledge
+            matches = match_knowledge(log_content, script_name=script_name)
+
+            if not matches:
+                return ""
+
+            # 只取top 5条,避免token过多
+            top_matches = matches[:5]
+            lines = ["## 知识库参考(历史上类似问题的已知根因)："]
+            for i, m in enumerate(top_matches, 1):
+                lines.append(f"{i}. [{m.category}] {m.cause}")
+                if m.solution:
+                    lines.append(f"   解决: {m.solution}")
+                if m.script_name:
+                    lines.append(f"   来源脚本: {m.script_name}")
+            lines.append("")
+            lines.append("请参考以上已知问题判断当前日志是否属于同类问题,但不要生搬硬套,要根据实际日志内容分析。")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _get_experience_context(self):
+        """读取分析经验指南"""
+        try:
+            import os
+            # 查找经验文件
+            possible_paths = [
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__)))), ".kiro", "steering", "script-analysis.md"),
+                os.path.join(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__))), "script-analysis.md"),
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    # 截取关键部分(不超过2000字符)
+                    if len(content) > 2000:
+                        content = content[:2000] + "\n...(截断)"
+                    return f"## 分析经验指南：\n{content}"
+            return ""
+        except Exception:
+            return ""
+
+    def _get_source_context(self):
+        """尝试获取脚本源码摘要"""
+        try:
+            script_name = self.get_script_name_fn() if self.get_script_name_fn else ""
+            if not script_name:
+                return ""
+
+            from .source_viewer import find_script_file
+            script_path = find_script_file(script_name)
+            if not script_path:
+                return ""
+
+            with open(script_path, "r", encoding="utf-8", errors="replace") as f:
+                source = f.read()
+
+            # 只取前100行(函数定义和描述部分)
+            lines = source.splitlines()[:100]
+            snippet = "\n".join(lines)
+            if len(snippet) > 3000:
+                snippet = snippet[:3000] + "\n...(截断)"
+
+            return f"## 脚本源码(前100行,帮助理解测试目的)：\n```\n{snippet}\n```"
+        except Exception:
+            return ""

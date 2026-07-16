@@ -2,13 +2,25 @@
   "host": "10.28.243.18",
   "user": "Ableson.Niu",
   "password": "admin@fs123",
-  "monitor_dir": "/home/Ableson.Niu/N5850-48S6Q_main_Q3_P0P1P2_1/",
-  "dut_name": "5812_13",
-  "topo_mode": "single",
+  "monitor_dir": "/home/Ableson.Niu/N5580-32C_4.8.4E_network_P0/",
+  "dut_name": "network_4.8.4E_P0",
+  "topo_mode": "multi",
   "dut_devices": [
     {
       "role": "DUT1",
       "ip": "10.28.162.25"
+    },
+    {
+      "role": "DUT2",
+      "ip": "10.28.162.132"
+    },
+    {
+      "role": "DUT3",
+      "ip": "10.28.162.87"
+    },
+    {
+      "role": "DUT4",
+      "ip": "10.28.162.62"
     }
   ],
   "dut_ip": "10.28.164.13",

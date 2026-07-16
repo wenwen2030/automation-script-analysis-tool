@@ -7,12 +7,12 @@ import tkinter.ttk as ttk
 from tkinter import messagebox
 import paramiko
 
-from . import theme
-from .analysis import AnalysisDialog
-from .config import MAX_RETRY
-from .monitor import monitor
+from .. import theme
+from ..analysis import AnalysisDialog
+from ..config import MAX_RETRY
+from ..core.monitor import monitor
 from .ssh_terminal import SshTerminal, SshTerminalContainer
-from .utils import show_popup
+from ..utils import show_popup
 
 
 class BatchControlPanel:
@@ -21,7 +21,7 @@ class BatchControlPanel:
     def __init__(self, host, user, password, monitor_dir, popup_enabled,
                  automation_cmd, dut_name, initial_scripts,
                  dut_ip="", dut_user="admin", dut_pass="pica8", max_retry=MAX_RETRY,
-                 dut_devices=None):
+                 dut_devices=None, feishu_spreadsheet_token="", feishu_sheet_id=""):
         self.host = host
         self.user = user
         self.password = password
@@ -34,6 +34,8 @@ class BatchControlPanel:
         self.dut_user = dut_user
         self.dut_pass = dut_pass
         self.max_retry = max(1, int(max_retry))
+        self.feishu_spreadsheet_token = feishu_spreadsheet_token
+        self.feishu_sheet_id = feishu_sheet_id
 
         self.stop_event = threading.Event()
         self.worker_thread = None
@@ -202,10 +204,17 @@ class BatchControlPanel:
         stats_frame.pack(pady=(8, 0), fill="x")
         ttk.Label(stats_frame, textvariable=self.stats_var,
                   font=("Segoe UI", 9, "bold")).pack(side="left")
-        ttk.Button(stats_frame, text="清空结果", width=10,
-                   command=self._clear_results).pack(side="right")
-        ttk.Button(stats_frame, text="删除选中", width=10,
-                   command=self._delete_selected_results).pack(side="right", padx=(0, 4))
+        self._stats_btn_clear = ttk.Button(stats_frame, text="清空结果",
+                                           command=self._clear_results)
+        self._stats_btn_clear.pack(side="right", padx=1)
+        self._stats_btn_delete = ttk.Button(stats_frame, text="删除选中",
+                                            command=self._delete_selected_results)
+        self._stats_btn_delete.pack(side="right", padx=1)
+        self._stats_btn_summary = ttk.Button(stats_frame, text="汇总报告",
+                                             command=self._generate_summary_html)
+        self._stats_btn_summary.pack(side="right", padx=1)
+        # 监听宽度变化,自适应按钮文字
+        stats_frame.bind("<Configure>", self._adapt_stats_buttons)
 
         self.running_item_id = None
 
@@ -559,6 +568,21 @@ class BatchControlPanel:
                 self._update_stats()
         self.root.after(0, _update)
 
+    def _adapt_stats_buttons(self, event=None):
+        """根据stats_frame宽度自适应按钮文字(长名/短名)"""
+        try:
+            width = event.width if event else 300
+            if width >= 350:
+                self._stats_btn_summary.config(text="汇总报告")
+                self._stats_btn_delete.config(text="删除选中")
+                self._stats_btn_clear.config(text="清空结果")
+            else:
+                self._stats_btn_summary.config(text="汇总")
+                self._stats_btn_delete.config(text="删除")
+                self._stats_btn_clear.config(text="清空")
+        except Exception:
+            pass
+
     def _update_stats(self):
         pass_count = fail_count = total = 0
         for item_id in self.result_tree.get_children():
@@ -585,6 +609,173 @@ class BatchControlPanel:
         self._update_stats()
         self._save_results()
 
+    def _generate_summary_html(self):
+        """SSH连接服务器,扫描monitor_dir下所有日志,生成bws汇总HTML"""
+        self.log("生成汇总报告...", "highlight")
+        threading.Thread(target=self._gen_html_worker, daemon=True).start()
+
+    def _gen_html_worker(self):
+        """后台生成汇总HTML"""
+        import re as _re
+        import time as _time
+
+        FINISH_RE = _re.compile(r"script finished:\s*(pass|fail|errScript\w+|undefined|errDeviceDied)", _re.IGNORECASE)
+        TITLE_RE = _re.compile(r"script title:\s*\"(.+?)\"", _re.IGNORECASE)
+        MAINTAINER_RE = _re.compile(r"sMaintainer.*?=\s*(.+)", _re.IGNORECASE)
+        TIME_RE = _re.compile(r"^(\d{2}:\d{2}:\d{2})\s", _re.MULTILINE)
+
+        try:
+            import paramiko
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(self.host, username=self.user, password=self.password, timeout=10)
+
+            # 列出所有.txt文件
+            _, stdout, _ = client.exec_command(f"ls -1 {self.monitor_dir}/*.txt 2>/dev/null | grep -v TestCases.txt")
+            files = [f.strip() for f in stdout.read().decode().splitlines() if f.strip()]
+            self.log(f"找到 {len(files)} 个日志文件")
+
+            if not files:
+                self.log("目录下没有日志文件", "error")
+                client.close()
+                return
+
+            results = []
+            for filepath in sorted(files):
+                import os
+                filename = os.path.basename(filepath)
+                test_id = filename[:-4] if filename.endswith(".txt") else filename
+
+                # 读取文件内容(前20行+后20行,用于提取元数据和结果)
+                _, stdout, _ = client.exec_command(f"head -50 '{filepath}' 2>/dev/null")
+                head = stdout.read().decode("utf-8", errors="replace")
+                _, stdout, _ = client.exec_command(f"tail -20 '{filepath}' 2>/dev/null")
+                tail = stdout.read().decode("utf-8", errors="replace")
+
+                # 获取首尾时间戳计算RUNTIME
+                _, stdout, _ = client.exec_command(f"head -1 '{filepath}' 2>/dev/null")
+                first_line = stdout.read().decode("utf-8", errors="replace")
+                _, stdout, _ = client.exec_command(f"tail -1 '{filepath}' 2>/dev/null")
+                last_line = stdout.read().decode("utf-8", errors="replace")
+
+                content = head + "\n" + tail
+
+                # STATUS
+                status = "unknown"
+                match = FINISH_RE.search(tail)
+                if match:
+                    status = match.group(1)
+
+                # TITLE
+                title = ""
+                match = TITLE_RE.search(head)
+                if match:
+                    title = match.group(1)
+
+                # MAINTAINER
+                maintainer = ""
+                match = MAINTAINER_RE.search(head)
+                if match:
+                    maintainer = match.group(1).strip()
+
+                # RUNTIME
+                runtime = ""
+                t1 = TIME_RE.search(first_line)
+                t2 = TIME_RE.search(last_line)
+                if t1 and t2:
+                    try:
+                        def to_sec(t):
+                            h, m, s = t.split(":")
+                            return int(h) * 3600 + int(m) * 60 + int(s)
+                        diff = to_sec(t2.group(1)) - to_sec(t1.group(1))
+                        if diff < 0:
+                            diff += 86400
+                        h, rem = divmod(diff, 3600)
+                        m, s = divmod(rem, 60)
+                        runtime = f"{h:02d}:{m:02d}:{s:02d}"
+                    except Exception:
+                        pass
+
+                results.append({
+                    "test_id": test_id,
+                    "title": title,
+                    "runtime": runtime,
+                    "status": status,
+                    "maintainer": maintainer,
+                    "filename": filename,
+                })
+
+            client.close()
+
+            # 生成HTML
+            html_lines = []
+            html_lines.append("""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; }
+        th, td { border: 1px solid #000; padding: 8px 12px; text-align: left; }
+        th { background-color: #f0f0f0; }
+        .status-pass { background-color: #00FF00; color: #000; font-weight: bold; }
+        .status-fail { background-color: #FF0000; color: #FFF; font-weight: bold; }
+        .status-unsupported { background-color: #FFFF00; color: #000; font-weight: bold; }
+        a { color: #0000EE; }
+    </style>
+</head>
+<body>
+<table>
+    <tr>
+        <th style="text-align: center;">TEST ID</th>
+        <th style="border: 1px solid #000; padding: 8px; text-align: center; width: 600px;">TITLE</th>
+        <th style="text-align: center;">RUNTIME</th>
+        <th style="text-align: center;">BASELINE</th>
+        <th style="text-align: center;">STATUS</th>
+        <th style="text-align: center;">BUGS</th>
+        <th style="text-align: center;">MAINTAINER</th>
+    </tr>""")
+
+            for r in results:
+                s = r["status"].lower()
+                if s == "pass":
+                    css = "status-pass"
+                elif s in ("undefined", "unsupported"):
+                    css = "status-unsupported"
+                else:
+                    css = "status-fail"
+                html_lines.append(f"""    <tr>
+        <td><a href="{r['filename']}" type="text/plain" target="_blank">{r['test_id']}</a></td>
+        <td style="border: 1px solid #000; padding: 8px; text-align: left; width: 600px;">{r['title']}</td>
+        <td>{r['runtime']}</td>
+        <td style="border: 1px solid #000;"></td>
+        <td class="{css}">{r['status']}</td>
+        <td>&nbsp;</td>
+        <td style="border: 1px solid #000; padding: 8px; text-align: center;">{r['maintainer']}</td>
+    </tr>""")
+
+            html_lines.append("</table>\n</body>\n</html>")
+            html_content = "\n".join(html_lines)
+
+            # 写到远程服务器
+            client2 = paramiko.SSHClient()
+            client2.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client2.connect(self.host, username=self.user, password=self.password, timeout=10)
+            sftp = client2.open_sftp()
+            remote_path = f"{self.monitor_dir}/bws_summary.html"
+            with sftp.file(remote_path, "w") as f:
+                f.write(html_content.encode("utf-8"))
+            sftp.close()
+            client2.close()
+
+            pass_count = sum(1 for r in results if r["status"].lower() == "pass")
+            fail_count = len(results) - pass_count
+            self.log(f"汇总报告已生成: {remote_path}", "success")
+            self.log(f"总计 {len(results)} 个脚本, PASS: {pass_count}, FAIL/其他: {fail_count}", "highlight")
+
+        except Exception as e:
+            self.log(f"生成汇总报告失败: {e}", "error")
+
     # ---- 后台执行 ----
 
     def _batch_worker(self):
@@ -592,6 +783,16 @@ class BatchControlPanel:
         self.log(f"服务器: {self.host}")
         self.log(f"DUT: {self.dut_name}")
         self.log(f"失败重试: 最多 {self.max_retry} 次")
+
+        # 飞书表格权限预检
+        if self.feishu_spreadsheet_token and self.feishu_sheet_id:
+            self.log("飞书表格: 已配置,验证权限...", "highlight")
+            from ..integrations.feishu_client import get_tenant_token
+            token = get_tenant_token()
+            if token:
+                self.log("飞书表格: ✓ 连接正常,PASS结果将自动填写", "success")
+            else:
+                self.log("飞书表格: ✗ Token获取失败,PASS结果不会自动填写", "error")
 
         idx = 0
         while not self.stop_event.is_set():
@@ -633,6 +834,13 @@ class BatchControlPanel:
                     final_result = result
                     if self.popup_enabled:
                         show_popup(result)
+                    # 飞书表格自动填写PASS结果
+                    if getattr(self, "feishu_spreadsheet_token", "") and getattr(self, "feishu_sheet_id", ""):
+                        from ..integrations.feishu_sheets import fill_pass_async
+                        fill_pass_async(self.feishu_spreadsheet_token, self.feishu_sheet_id,
+                                        script_name, log_fn=self.log,
+                                        host=self.host, user=self.user,
+                                        password=self.password, monitor_dir=self.monitor_dir)
                     break
                 elif result.lower() == "undefined":
                     # undefined 表示脚本已正常结束但结果未定义，不需要重试
@@ -752,7 +960,7 @@ class BatchControlPanel:
             if getattr(_sys, 'frozen', False):
                 base = _os.path.dirname(_sys.executable)
             else:
-                base = _os.path.dirname(_os.path.abspath(__file__))
+                base = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
             path = _os.path.join(base, "last_results.json")
             with open(path, "w", encoding="utf-8") as f:
                 _json.dump(results, f, ensure_ascii=False, indent=2)
@@ -769,7 +977,7 @@ class BatchControlPanel:
             if getattr(_sys, 'frozen', False):
                 base = _os.path.dirname(_sys.executable)
             else:
-                base = _os.path.dirname(_os.path.abspath(__file__))
+                base = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
             path = _os.path.join(base, "last_results.json")
             if not _os.path.exists(path):
                 print(f"[load_results] not found: {path}")
@@ -792,6 +1000,8 @@ class BatchControlPanel:
                 return
             self.stop_event.set()
         self._stop_timer()
+        # 保存执行结果
+        self._save_results()
         # 先断开所有终端连接并等待线程退出
         try:
             if hasattr(self, "ssh_terminal"):
@@ -815,7 +1025,7 @@ class BatchControlPanel:
         if getattr(sys, 'frozen', False):
             icon_path = os.path.join(os.path.dirname(sys.executable), "app_icon.ico")
         else:
-            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app_icon.ico")
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "app_icon.ico")
         if os.path.exists(icon_path):
             try:
                 window.iconbitmap(icon_path)

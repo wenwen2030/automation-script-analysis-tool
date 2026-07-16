@@ -13,7 +13,7 @@ except ImportError:
 def _settings_path():
     if getattr(sys, "frozen", False):
         return os.path.join(os.path.dirname(sys.executable), "ssh_terminal_settings.json")
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssh_terminal_settings.json")
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ssh_terminal_settings.json")
 
 def _load_terminal_settings():
     p = _settings_path()

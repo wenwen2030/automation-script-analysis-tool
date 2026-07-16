@@ -40,6 +40,23 @@ DEFAULT_DUT_PASS = "pica8"
 DEEPSEEK_API_KEY = ""  # 在这里填入你的 DeepSeek API Key
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
+# 飞书应用配置(统一定义,其他模块引用)
+FEISHU_APP_ID = ""  # 飞书应用 App ID
+FEISHU_APP_SECRET = ""  # 飞书应用 App Secret
+
+# 飞书多维表格(知识库后端)
+FEISHU_BITABLE_TOKEN = "J1uobQuWfapKePsgR53c7BHnnxh"
+FEISHU_TABLE_ID = "tblXeYRs2gX0JpR9"
+
+# 知识库存储后端: "ssh" / "feishu" / "local"
+KB_STORAGE_BACKEND = "feishu"
+
+# 知识库SSH后端配置
+KB_REMOTE_HOST = "10.28.164.199"
+KB_REMOTE_USER = "admin"
+KB_REMOTE_PASS = "pica8"
+KB_REMOTE_DIR = "/home/pica8/Log/Ableson.Niu/knowledge_base"
+
 # 版本信息
-APP_VERSION = "1.0.0"
-GITHUB_REPO = "wenwen2030/automation-script-analysis-tool"  # GitHub 用户名/仓库名
+APP_VERSION = "1.2.0"
+GITHUB_REPO = "wenwen2030/automation-script-analysis-tool"

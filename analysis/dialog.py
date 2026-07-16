@@ -128,7 +128,7 @@ class AnalysisDialog:
         # ---- 完整日志（含搜索框）----
         log_tab = ttk.Frame(self.nb, padding=8)
         self.log_text = tk.Text(
-            log_tab, wrap=tk.NONE, bg="#1e1e1e", fg="#d4d4d4",
+            log_tab, wrap=tk.CHAR, bg="#1e1e1e", fg="#d4d4d4",
             font=("Consolas", 9), state=tk.DISABLED,
             borderwidth=0, highlightthickness=0,
         )
@@ -324,7 +324,12 @@ class AnalysisDialog:
             # 每个 fail 点的详细信息：所属 Step + 现象 + 组包
             self.summary_text.insert(tk.END, "失败点详细分析\n", "title")
             for idx, fc in enumerate(a.get("fail_contexts", []), 1):
-                self.summary_text.insert(tk.END, f"\n[失败点 {idx}] L{fc['line_no']}\n", "title")
+                self.summary_text.insert(tk.END, f"\n[失败点 {idx}] L{fc['line_no']}  ", "title")
+                # 嵌入"加入知识库"按钮
+                add_btn = ttk.Button(self.summary_text, text="+知识库",
+                                     command=lambda fc=fc, idx=idx: self._add_fail_to_kb(fc, idx))
+                self.summary_text.window_create(tk.END, window=add_btn)
+                self.summary_text.insert(tk.END, "\n")
                 # Step 信息
                 if fc.get("step"):
                     s = fc["step"]
@@ -397,6 +402,28 @@ class AnalysisDialog:
     def _add_to_kb(self):
         """弹出增强版添加知识库对话框"""
         show_add_dialog(self.top, analysis=self._analysis,
+                        script_name=self.script_name, ssh_user=self.user)
+
+    def _add_fail_to_kb(self, fail_context, idx):
+        """针对单个失败点弹出添加知识库对话框(预填该失败点信息)"""
+        # 构造一个只包含这个失败点的伪analysis对象
+        single_analysis = {
+            "result": self._analysis.get("result", "fail") if self._analysis else "fail",
+            "failures": [],
+            "fail_contexts": [fail_context],
+            "expected": "",
+            "got": "",
+            "timeouts": [],
+            "hints": [],
+            "meta": self._analysis.get("meta", {}) if self._analysis else {},
+        }
+        # 如果这个fail_context有对应的failure行
+        if fail_context.get("line_no"):
+            for ln, line in (self._analysis or {}).get("failures", []):
+                if ln == fail_context["line_no"]:
+                    single_analysis["failures"] = [(ln, line)]
+                    break
+        show_add_dialog(self.top, analysis=single_analysis,
                         script_name=self.script_name, ssh_user=self.user)
 
     def _manage_kb(self):

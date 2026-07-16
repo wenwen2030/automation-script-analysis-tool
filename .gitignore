@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 运行时生成的数据文件
+last_results.json
+login_settings.json
+ssh_terminal_settings.json
+analysis_history.json
+
+# 嵌套误生成目录
+monitor_tool/

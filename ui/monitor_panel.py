@@ -6,10 +6,10 @@ import tkinter as tk
 import tkinter.ttk as ttk
 import paramiko
 
-from . import theme
-from .config import POLL_INTERVAL, FINISH_PATTERN, IGNORE_FILES
-from .monitor import monitor, find_new_log
-from .utils import show_popup
+from .. import theme
+from ..config import POLL_INTERVAL, FINISH_PATTERN, IGNORE_FILES
+from ..core.monitor import monitor, find_new_log
+from ..utils import show_popup
 
 
 class MonitorPanel:

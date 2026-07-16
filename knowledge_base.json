@@ -1,24 +1,46 @@
 [
   {
-    "pattern": "[line:102] #Proc -- Fail: {pica8CheckText <ttyS[01]> Failed, the result is not expected as below:}",
-    "cause": "1111",
+    "pattern": "Fail: {pica8CheckText <Count: 1000 lines> Failed, the result is not expected as below:",
+    "cause": "需要修改脚本预期行为.MAC同步只发生在两端link-id匹配的MLAG接口之间,当两端link-id不匹配时,不会重新下mac到peer-link",
     "solution": "",
-    "category": "其他",
-    "script_name": "pica8CliSysRunshow_01_04",
-    "step_info": "Step 1: run show system boot-messages",
-    "added_by": "",
-    "added_at": "2026-06-01 14:12",
+    "category": "脚本问题",
+    "script_name": "MlagCoreArch_01_05",
+    "step_info": "Step 5: Change mlag1 link-id as 3 in dut1, check state and mac of mlag1 and mlag2, result5, run clear mac address table",
+    "added_by": "Ableson.Niu",
+    "added_at": "2026-07-15 18:26",
     "hit_count": 0
   },
   {
-    "pattern": "11111",
-    "cause": "11111",
-    "solution": "1111111",
-    "category": "时序问题",
-    "script_name": "111",
+    "pattern": "pica8CheckText.*Failed, the result is not expected",
+    "cause": "iptables规则检查未通过，预期内容与实际不匹配",
+    "solution": "检查switch1上iptables规则是否正确配置，修改脚本的正则匹配规则",
+    "category": "脚本问题",
+    "script_name": "InbandLogin_01_03",
+    "step_info": "Step 4: Check ssh on switch2 and check iptable routes on switch1",
+    "added_by": "Ableson.Niu",
+    "added_at": "2026-07-13 16:10",
+    "hit_count": 15
+  },
+  {
+    "pattern": "pica8CheckText.*Failed, the result is not expected as below",
+    "cause": "检查IPv6报文转发或MAC地址匹配时，期望的报文内容未在指定端口收到",
+    "solution": "检查DUT1的te1接口IPv6转发配置及对端设备连接状态",
+    "category": "功能bug",
+    "script_name": "PBR_01_14",
+    "step_info": "Step 7: send ipv6 packets to te1 of dut1,result4",
+    "added_by": "Ableson.Niu",
+    "added_at": "2026-07-11 07:43",
+    "hit_count": 17
+  },
+  {
+    "pattern": "",
+    "cause": "",
+    "solution": "",
+    "category": "其他",
+    "script_name": "",
     "step_info": "",
     "added_by": "",
-    "added_at": "2026-05-29 17:37",
-    "hit_count": 4
+    "added_at": "2026-07-14 15:11",
+    "hit_count": 12
   }
 ]

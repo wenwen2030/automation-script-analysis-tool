@@ -6,11 +6,11 @@
 
 import sys
 
-from .login_dialog import show_login
-from .monitor_panel import MonitorPanel
-from .batch_panel import BatchControlPanel
+from .ui.login_dialog import show_login
+from .ui.monitor_panel import MonitorPanel
+from .ui.batch_panel import BatchControlPanel
 from .analysis.script_index import get_index
-from .updater import check_update
+from .integrations.updater import check_update
 
 
 def main():
@@ -48,6 +48,8 @@ def main():
                 dut_pass=params.get("dut_pass", "pica8"),
                 max_retry=params.get("max_retry", 3),
                 dut_devices=params.get("dut_devices", []),
+                feishu_spreadsheet_token=params.get("feishu_spreadsheet_token", ""),
+                feishu_sheet_id=params.get("feishu_sheet_id", ""),
             )
             panel.run()
             if panel.go_back:

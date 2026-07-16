@@ -13,11 +13,8 @@ import time
 import paramiko
 
 
-# 全局 SSH 连接缓存：(host, user) -> (client, last_used_time)
-_SSH_POOL = {}
-_SSH_LOCK = threading.Lock()
-# 连接闲置超时（秒）
-_SSH_IDLE_TIMEOUT = 60
+# SSH连接复用公共模块
+from ..ssh_utils import get_ssh_client as _get_ssh_client, close_all_ssh
 
 
 def _get_cache_dir():
@@ -30,47 +27,6 @@ def _get_cache_dir():
 def _cache_key(host, user, remote_path):
     h = hashlib.md5(f"{host}|{user}|{remote_path}".encode()).hexdigest()
     return os.path.join(_get_cache_dir(), h + ".log")
-
-
-def _get_ssh_client(host, user, password):
-    """获取/创建 SSH 连接（缓存复用）"""
-    key = (host, user)
-    with _SSH_LOCK:
-        if key in _SSH_POOL:
-            client, _ = _SSH_POOL[key]
-            try:
-                # 测试连接是否还活着
-                transport = client.get_transport()
-                if transport and transport.is_active():
-                    _SSH_POOL[key] = (client, time.time())
-                    return client
-            except Exception:
-                pass
-            # 连接死了，清理
-            try:
-                client.close()
-            except Exception:
-                pass
-            del _SSH_POOL[key]
-
-        # 新建连接
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, username=user, password=password, timeout=10,
-                       look_for_keys=False, allow_agent=False, banner_timeout=10)
-        _SSH_POOL[key] = (client, time.time())
-        return client
-
-
-def close_all_ssh():
-    """关闭所有缓存的 SSH 连接（程序退出时调用）"""
-    with _SSH_LOCK:
-        for client, _ in _SSH_POOL.values():
-            try:
-                client.close()
-            except Exception:
-                pass
-        _SSH_POOL.clear()
 
 
 # 失败状态判定
@@ -367,7 +323,7 @@ def analyze(text, script_name=None, search_dir=None):
 
     # 匹配用户自定义知识库
     from ..knowledge import match_knowledge
-    kb_matches = match_knowledge(text)
+    kb_matches = match_knowledge(text, script_name=script_name or "")
 
     # 中文摘要
     parts = [f"测试结果: {result.upper()}"]

@@ -6,8 +6,8 @@ import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from . import theme
-from .config import (
+from .. import theme
+from ..config import (
     DEFAULT_HOST, DEFAULT_USER, DEFAULT_PASS, DEFAULT_DIR,
     DEFAULT_AUTOMATION_CMD, DEFAULT_DUT_NAME,
     DEFAULT_DUT_IP, DEFAULT_DUT_USER, DEFAULT_DUT_PASS,
@@ -19,7 +19,7 @@ def _get_settings_path():
     if getattr(sys, 'frozen', False):
         base = os.path.dirname(sys.executable)
     else:
-        base = os.path.dirname(os.path.abspath(__file__))
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "login_settings.json")
 
 
@@ -190,6 +190,16 @@ class LoginDialog:
         ttk.Label(retry_row, text="（连续 N 次都 fail 才算 fail）",
                   foreground="gray").pack(side="left", padx=8)
 
+        # 飞书表格链接(可选,PASS时自动填写结果) — 不保存,每次手动填
+        self.feishu_link_var = tk.StringVar(value="")
+        ttk.Label(self.batch_frame, text="飞书表格:").grid(row=7, column=0, sticky="e", padx=5, pady=4)
+        feishu_row = ttk.Frame(self.batch_frame)
+        feishu_row.grid(row=7, column=1, sticky="ew", pady=4)
+        ttk.Entry(feishu_row, textvariable=self.feishu_link_var,
+                  font=("Consolas", 9)).pack(side="left", fill="x", expand=True)
+        ttk.Label(feishu_row, text="(可选,PASS自动填写)",
+                  foreground="gray").pack(side="left", padx=4)
+
         self.batch_frame.columnconfigure(1, weight=1)
 
         # 返回登录时恢复模式
@@ -228,12 +238,31 @@ class LoginDialog:
         if getattr(sys, 'frozen', False):
             icon_path = os.path.join(os.path.dirname(sys.executable), "app_icon.ico")
         else:
-            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app_icon.ico")
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "app_icon.ico")
         if os.path.exists(icon_path):
             try:
                 window.iconbitmap(icon_path)
             except Exception:
                 pass
+
+    @staticmethod
+    def _parse_feishu_link(link):
+        """从飞书表格链接中解析出spreadsheet_token和sheet_id
+
+        支持格式:
+            https://xxx.feishu.cn/sheets/TOKEN?sheet=SHEET_ID
+            https://xxx.feishu.cn/sheets/TOKEN
+        """
+        import re
+        if not link:
+            return "", ""
+        # 提取 spreadsheet_token
+        m = re.search(r"/sheets/([A-Za-z0-9]+)", link)
+        token = m.group(1) if m else ""
+        # 提取 sheet_id (从?sheet=参数)
+        m2 = re.search(r"[?&]sheet=([A-Za-z0-9]+)", link)
+        sheet_id = m2.group(1) if m2 else ""
+        return token, sheet_id
 
     def _toggle_batch(self):
         if self.mode_var.get() == "batch":
@@ -355,6 +384,11 @@ class LoginDialog:
                 self._result["max_retry"] = max(1, int(self.retry_var.get()))
             except (ValueError, tk.TclError):
                 self._result["max_retry"] = MAX_RETRY
+            # 解析飞书表格链接
+            feishu_link = self.feishu_link_var.get().strip()
+            fs_token, fs_sheet = self._parse_feishu_link(feishu_link)
+            self._result["feishu_spreadsheet_token"] = fs_token
+            self._result["feishu_sheet_id"] = fs_sheet
 
         try:
             saved_retry = max(1, int(self.retry_var.get()))
@@ -399,7 +433,7 @@ def show_login(initial_scripts=None):
     dlg = LoginDialog(root, initial_scripts=initial_scripts)
 
     # 启动后台版本检查
-    from .updater import check_update
+    from ..integrations.updater import check_update
     check_update(dlg.top)
 
     root.wait_window(dlg.top)
